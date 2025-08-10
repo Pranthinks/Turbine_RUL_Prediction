@@ -1,4 +1,16 @@
 services:
   postgres:
     ports:
-      - "5433:5432"  # Move Astro's PostgreSQL to port 5433
+      - "5433:5432"
+  scheduler:
+    volumes:
+      - //var/run/docker.sock:/var/run/docker.sock
+  api-server:
+    volumes:
+      - //var/run/docker.sock:/var/run/docker.sock
+  triggerer:
+    volumes:
+      - //var/run/docker.sock:/var/run/docker.sock
+  dag-processor:
+    volumes:
+      - //var/run/docker.sock:/var/run/docker.sock

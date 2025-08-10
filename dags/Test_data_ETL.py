@@ -96,13 +96,14 @@ with DAG(
 
     @task
     def test_load_data(df):
-        # Insert data into PostgreSQL
         postgres_hook = PostgresHook(postgres_conn_id="my_postgres_connection")
+    
+    # Clear existing data but KEEP your schema
+        postgres_hook.run("TRUNCATE TABLE test_turbofan_data")
+    # Insert new data into existing table structure
         df.to_sql('test_turbofan_data', postgres_hook.get_sqlalchemy_engine(),
-                 if_exists='append', index=False, method='multi')
-        
+             if_exists='append', index=False, method='multi')
         print(f"Loaded {len(df)} records into PostgreSQL")
-
     # Add to your DAG tasks
     test_create_table_task = test_create_table()
     test_transform_task = test_transform_data()

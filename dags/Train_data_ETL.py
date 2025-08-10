@@ -1,6 +1,7 @@
 from airflow import DAG
 from airflow.decorators import task
 from airflow.providers.postgres.hooks.postgres import PostgresHook
+from airflow.providers.docker.operators.docker import DockerOperator
 from datetime import datetime, timedelta
 import pandas as pd
 import os
@@ -82,6 +83,10 @@ with DAG(
     
         # Insert data into PostgreSQL
         postgres_hook = PostgresHook(postgres_conn_id="my_postgres_connection")
+        
+        # Clear existing data but KEEP your schema
+        postgres_hook.run("TRUNCATE TABLE train_turbofan_data")  # ← ONLY THIS LINE ADDED
+        
         df.to_sql('train_turbofan_data', postgres_hook.get_sqlalchemy_engine(), 
               if_exists='append', index=False, method='multi')
     
@@ -91,6 +96,5 @@ with DAG(
     train_create_table_task = train_create_table()
     train_transform_task = train_transform_data()
 
-# Set dependency
+    # Set dependency
     train_create_table_task >> train_transform_task
-    
