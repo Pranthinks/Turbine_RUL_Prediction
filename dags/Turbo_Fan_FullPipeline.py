@@ -28,11 +28,14 @@ with DAG(
         'force_pull': False,
         'docker_url': 'unix://var/run/docker.sock',
         'retrieve_output': True,
+        'network_mode': 'turbine_rul_mlpipeline_turbine-network',
         'mounts': [Mount(source='turbine_artifacts', target='/app/artifacts', type='volume')],
         'environment': {
             'ARTIFACTS_PATH': '/app/artifacts',
             'LOGS_PATH': '/app/logs',
-            'CONFIG_PATH': '/app/config'
+            'CONFIG_PATH': '/app/config',
+            'PROMETHEUS_ENABLED': 'true',
+            'PUSHGATEWAY_URL': 'pushgateway:9091'
         }
     }
 
