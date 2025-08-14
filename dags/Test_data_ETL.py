@@ -4,10 +4,12 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
 from datetime import datetime, timedelta
 import pandas as pd
 import os
+import kagglehub
+import shutil
 
 # Define the DAG
 with DAG(
-    dag_id='create_turbofan_test_table',
+    dag_id='TEST_DATA_ETL',
     start_date=datetime.now() - timedelta(days=1),
     schedule=None,  # Manual trigger only
     catchup=False,
@@ -63,8 +65,35 @@ with DAG(
 
     @task
     def test_transform_data():
-        # Load test data from local file
-        df = pd.read_csv('/usr/local/airflow/dags/test_FD001.txt',
+        # Cache directory for dataset
+        cache_dir = "/tmp/kaggle_cmaps_cache"
+        
+        # Check if files are already cached
+        test_file_path = os.path.join(cache_dir, "test_FD001.txt")
+        rul_file_path = os.path.join(cache_dir, "RUL_FD001.txt")
+        
+        if os.path.exists(test_file_path) and os.path.exists(rul_file_path):
+            print("Using cached dataset files")
+            data_path = cache_dir
+        else:
+            print("Downloading dataset from Kaggle...")
+            # Download latest version from Kaggle
+            path = kagglehub.dataset_download("behrad3d/nasa-cmaps")
+            print("Path to dataset files:", path)
+            
+            # Files are inside CMaps folder
+            cmaps_path = os.path.join(path, 'CMaps')
+            
+            # Create cache directory and copy files
+            os.makedirs(cache_dir, exist_ok=True)
+            shutil.copy2(os.path.join(cmaps_path, 'test_FD001.txt'), test_file_path)
+            shutil.copy2(os.path.join(cmaps_path, 'RUL_FD001.txt'), rul_file_path)
+            
+            print("Files cached for future use")
+            data_path = cache_dir
+        
+        # Load test data from cached files
+        df = pd.read_csv(os.path.join(data_path, 'test_FD001.txt'),
                         sep='\s+',  # Use regex for multiple spaces
                         header=None,
                         skipinitialspace=True)  # Skip leading spaces
@@ -74,8 +103,8 @@ with DAG(
                   [f'sensor_{i}' for i in range(1, 22)]
         df.columns = columns[:len(df.columns)]  # Match actual column count
         
-        # Load RUL data from separate file
-        rul_df = pd.read_csv('/usr/local/airflow/dags/RUL_FD001.txt',
+        # Load RUL data from cached files
+        rul_df = pd.read_csv(os.path.join(data_path, 'RUL_FD001.txt'),
                             header=None,
                             names=['rul'])
         

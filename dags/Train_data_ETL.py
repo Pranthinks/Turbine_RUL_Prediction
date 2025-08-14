@@ -1,18 +1,19 @@
 from airflow import DAG
 from airflow.decorators import task
 from airflow.providers.postgres.hooks.postgres import PostgresHook
-from airflow.providers.docker.operators.docker import DockerOperator
 from datetime import datetime, timedelta
 import pandas as pd
 import os
+import kagglehub
+import shutil
 
 # Define the DAG
 with DAG(
-    dag_id='create_turbofan_train_table',
+    dag_id='TRAIN_DATA_ETL',
     start_date=datetime.now() - timedelta(days=1),
     schedule=None,  # Manual trigger only
     catchup=False,
-    description='Create turbofan table in PostgreSQL'
+    description='Create turbofan train table in PostgreSQL'
 ) as dag:
     
     # Create the table if it doesn't exist
@@ -60,41 +61,71 @@ with DAG(
         
         # Execute the table creation query
         postgres_hook.run(create_table_query)
-        print("Turbofan table created successfully")
-    
+        print("Turbofan train table created successfully")
+
     @task
     def train_transform_data():
-        # Load data from local file (adjust path as needed)
-        df = pd.read_csv('/usr/local/airflow/dags/train_FD001.txt', 
-                 sep='\s+',  # Use regex for multiple spaces
-                 header=None, 
-                 skipinitialspace=True)  # Skip leading spaces
-    
+        # Cache directory for dataset
+        cache_dir = "/tmp/kaggle_cmaps_cache"
+        
+        # Check if files are already cached
+        train_file_path = os.path.join(cache_dir, "train_FD001.txt")
+        
+        if os.path.exists(train_file_path):
+            print("Using cached dataset files")
+            data_path = cache_dir
+        else:
+            print("Downloading dataset from Kaggle...")
+            # Download latest version from Kaggle
+            path = kagglehub.dataset_download("behrad3d/nasa-cmaps")
+            print("Path to dataset files:", path)
+            
+            # Files are inside CMaps folder
+            cmaps_path = os.path.join(path, 'CMaps')
+            
+            # Create cache directory and copy files
+            os.makedirs(cache_dir, exist_ok=True)
+            shutil.copy2(os.path.join(cmaps_path, 'train_FD001.txt'), train_file_path)
+            
+            print("Train file cached for future use")
+            data_path = cache_dir
+        
+        # Load train data from cached files
+        df = pd.read_csv(os.path.join(data_path, 'train_FD001.txt'),
+                        sep='\s+',  # Use regex for multiple spaces
+                        header=None,
+                        skipinitialspace=True)  # Skip leading spaces
+        
         # Define column names for your 26 columns
         columns = ['unit_id', 'time_cycles', 'op_setting_1', 'op_setting_2', 'op_setting_3'] + \
-              [f'sensor_{i}' for i in range(1, 22)]
+                  [f'sensor_{i}' for i in range(1, 22)]
         df.columns = columns[:len(df.columns)]  # Match actual column count
+        
         # Calculate RUL (max_cycles - current_cycles for each unit)
         df['rul'] = df.groupby('unit_id')['time_cycles'].transform(lambda x: x.max() - x)
-    
+        
         # Add metadata columns
-        df['data_type'] = 'train'  # or 'test' based on your file
-        df['dataset'] = 'FD001'    # adjust based on your dataset
-    
-        # Insert data into PostgreSQL
+        df['data_type'] = 'train'
+        df['dataset'] = 'FD001'
+        
+        print(f"Transformed {len(df)} records")
+        return df
+
+    @task
+    def train_load_data(df):
         postgres_hook = PostgresHook(postgres_conn_id="my_postgres_connection")
         
         # Clear existing data but KEEP your schema
-        postgres_hook.run("TRUNCATE TABLE train_turbofan_data")  # ← ONLY THIS LINE ADDED
+        postgres_hook.run("TRUNCATE TABLE train_turbofan_data")
+        # Insert new data into existing table structure
+        df.to_sql('train_turbofan_data', postgres_hook.get_sqlalchemy_engine(),
+                 if_exists='append', index=False, method='multi')
+        print(f"Loaded {len(df)} records into PostgreSQL")
         
-        df.to_sql('train_turbofan_data', postgres_hook.get_sqlalchemy_engine(), 
-              if_exists='append', index=False, method='multi')
-    
-        print(f"Inserted {len(df)} records")
-
     # Add to your DAG tasks
     train_create_table_task = train_create_table()
     train_transform_task = train_transform_data()
+    train_load_task = train_load_data(train_transform_task)
 
-    # Set dependency
-    train_create_table_task >> train_transform_task
+    # Set dependencies
+    train_create_table_task >> train_transform_task >> train_load_task
