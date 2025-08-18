@@ -1,9 +1,9 @@
 from airflow import DAG
 from airflow.providers.docker.operators.docker import DockerOperator
-from docker.types import Mount
 from datetime import datetime, timedelta
+from docker.types import Mount
 
-# Full Pipeline DAG - Simple Sequential Execution
+# Simple Pipeline DAG - Only Stage 1 and Stage 2
 default_args = {
     'owner': 'turbine-rul',
     'start_date': datetime.now() - timedelta(days=1),
@@ -12,15 +12,15 @@ default_args = {
 }
 
 with DAG(
-    dag_id='Turbine_RUL_Full_Pipeline',
+    dag_id='Drift_Calculation',
     default_args=default_args,
     schedule=None,  # Manual trigger
     catchup=False,
-    description='Full Turbine RUL ML Pipeline - All Stages',
-    tags=['turbine', 'rul', 'full', 'ml']
+    description='Pipeline - Stage 1 (Data Ingestion) and Stage 2 (Drift Detection)',
+    tags=['turbine', 'rul', 'stage1-2', 'docker']
 ) as dag:
 
-    # Common Docker configuration
+    # Common Docker configuration with VALID RESOURCE LIMITS ONLY
     common_docker_config = {
         'image': 'turbine_rul_mlpipeline-turbine-rul:latest',
         'auto_remove': 'success',
@@ -30,10 +30,11 @@ with DAG(
         'retrieve_output': True,
         'network_mode': 'turbine_rul_mlpipeline_turbine-network',
         'mounts': [Mount(source='turbine_artifacts', target='/app/artifacts', type='volume')],
-
+        
+        # VALID RESOURCE LIMITS ONLY
         'cpus': 2.0,              # Limit to 2 CPU cores
-        'mem_limit': '2g',  
-
+        'mem_limit': '2g',        # Limit to 2GB RAM
+        
         'environment': {
             'ARTIFACTS_PATH': '/app/artifacts',
             'LOGS_PATH': '/app/logs',
@@ -49,7 +50,7 @@ with DAG(
 
     # Stage 1: Data Ingestion
     stage_1 = DockerOperator(
-        task_id='Data_ingestion',
+        task_id='Data_Ingestion',
         command='python run_stage.py 1',
         retrieve_output_path='/tmp/stage1_output.log',
         **common_docker_config
@@ -57,46 +58,11 @@ with DAG(
 
     # Stage 2: Drift Detection
     stage_2 = DockerOperator(
-        task_id='Drift_Detection',
+        task_id='Drift_Calculation',
         command='python run_stage.py 2',
         retrieve_output_path='/tmp/stage2_output.log',
         **common_docker_config
     )
 
-    # Stage 3: Feature Engineering
-    stage_3 = DockerOperator(
-        task_id='Data_Transformation',
-        command='python run_stage.py 3',
-        retrieve_output_path='/tmp/stage3_output.log',
-        **common_docker_config
-    )
-
-    # Stage 4: Model Training
-    stage_4 = DockerOperator(
-        task_id='Feature_Engineering',
-        command='python run_stage.py 4',
-        retrieve_output_path='/tmp/stage4_output.log',
-        execution_timeout=timedelta(hours=4),
-        **common_docker_config
-    )
-
-    # Stage 5: Model Validation
-    stage_5 = DockerOperator(
-        task_id='Model_Training',
-        command='python run_stage.py 5',
-        retrieve_output_path='/tmp/stage5_output.log',
-        execution_timeout=timedelta(hours=4),
-        **common_docker_config
-    )
-
-    # Stage 6: Prediction/Inference
-    stage_6 = DockerOperator(
-        task_id='Model_Prediction',
-        command='python run_stage.py 6',
-        retrieve_output_path='/tmp/stage6_output.log',
-        execution_timeout=timedelta(hours=4),
-        **common_docker_config
-    )
-
-    # Simple sequential workflow - all stages run one after another
-    stage_1 >> stage_2 >> stage_3 >> stage_4 >> stage_5 >> stage_6
+    # Simple workflow: Stage 1 -> Stage 2
+    stage_1 >> stage_2
